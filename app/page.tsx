@@ -2,26 +2,26 @@
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 
-type Task = { id: number; task: string; cu: number; unit: string; type: string; division: string };
+type Task = { id: number; task: string; cu: number; days: number; unit: string; type: string; division: string };
 type Provider = { id: number; name: string; division: string; effort: number; earned: number };
 type Tab = "overview" | "calculator" | "approved" | "library" | "providers";
-type PlanLine = { task: string; unit: string; type?: string; quantity: number; libraryCu: number; appliedCu: number; totalCu: number; overridden: boolean };
+type PlanLine = { task: string; unit: string; type?: string; quantity: number; libraryCu: number; appliedCu: number; totalCu: number; libraryDays?: number; appliedDays?: number; totalDays?: number; cuOverridden?: boolean; daysOverridden?: boolean; overridden: boolean };
 type SavedPlan = { id: number; providerName: string; division: string; clinicalEffort: number; targetCu: number; plannedCu: number; hasOverrides: boolean; lines: PlanLine[]; status: string; createdAt: string };
 
 const BASE_TARGET = 460;
 const seedTasks: Task[] = [
-  { id: 1, task: "Inpatient consult service", cu: 5.5, unit: "day", type: "Inpatient service", division: "Cardiology" },
-  { id: 2, task: "Outpatient clinic", cu: 3.5, unit: "session", type: "Outpatient", division: "Cardiology" },
-  { id: 3, task: "Cardiac CT reads", cu: 0.35, unit: "read", type: "Ancillary", division: "Cardiology" },
-  { id: 4, task: "Cath lab coverage", cu: 6.5, unit: "day", type: "Procedural", division: "Cardiology" },
-  { id: 5, task: "Fellows clinic", cu: 2.75, unit: "session", type: "Outpatient", division: "Cardiology" },
-  { id: 6, task: "MICU attending", cu: 7.5, unit: "day", type: "Inpatient service", division: "Pulmonary" },
-  { id: 7, task: "Bronchoscopy", cu: 1.25, unit: "procedure", type: "Procedural", division: "Pulmonary" },
-  { id: 8, task: "Pulmonary clinic", cu: 3.25, unit: "session", type: "Outpatient", division: "Pulmonary" },
-  { id: 9, task: "PFT interpretation", cu: 0.3, unit: "read", type: "Ancillary", division: "Pulmonary" },
-  { id: 10, task: "Allergy clinic", cu: 3, unit: "session", type: "Outpatient", division: "Clinical Immunology" },
-  { id: 11, task: "Infusion supervision", cu: 2.25, unit: "session", type: "Procedural", division: "Clinical Immunology" },
-  { id: 12, task: "Inpatient immunology consult", cu: 5, unit: "day", type: "Inpatient service", division: "Clinical Immunology" },
+  { id: 1, task: "Inpatient consult service", cu: 5.5, days: 5, unit: "week", type: "Inpatient service", division: "Cardiology" },
+  { id: 2, task: "Outpatient clinic", cu: 3.5, days: .5, unit: "session", type: "Outpatient", division: "Cardiology" },
+  { id: 3, task: "Cardiac CT reads", cu: 0.35, days: .5, unit: "read block", type: "Ancillary", division: "Cardiology" },
+  { id: 4, task: "Cath lab coverage", cu: 6.5, days: 1, unit: "day", type: "Procedural", division: "Cardiology" },
+  { id: 5, task: "Fellows clinic", cu: 2.75, days: .5, unit: "session", type: "Outpatient", division: "Cardiology" },
+  { id: 6, task: "MICU attending", cu: 7.5, days: 5, unit: "week", type: "Inpatient service", division: "Pulmonary" },
+  { id: 7, task: "Bronchoscopy", cu: 1.25, days: .5, unit: "procedure block", type: "Procedural", division: "Pulmonary" },
+  { id: 8, task: "Pulmonary clinic", cu: 3.25, days: .5, unit: "session", type: "Outpatient", division: "Pulmonary" },
+  { id: 9, task: "PFT interpretation", cu: 0.3, days: .5, unit: "read block", type: "Ancillary", division: "Pulmonary" },
+  { id: 10, task: "Allergy clinic", cu: 3, days: .5, unit: "session", type: "Outpatient", division: "Clinical Immunology" },
+  { id: 11, task: "Infusion supervision", cu: 2.25, days: .5, unit: "session", type: "Procedural", division: "Clinical Immunology" },
+  { id: 12, task: "Inpatient immunology consult", cu: 5, days: 5, unit: "week", type: "Inpatient service", division: "Clinical Immunology" },
 ];
 const seedProviders: Provider[] = [
   { id: 1, name: "Dr. Elena Vasquez", division: "Cardiology", effort: 80, earned: 0 },
@@ -51,8 +51,8 @@ function csvRows(text: string) {
   });
 }
 function parseTasks(text: string, startId: number): Task[] {
-  return csvRows(text).map((row, index) => ({ id: startId + index, task: row.task, cu: Number(row.clinical_unit ?? row.clinicla_unit ?? row.cu), unit: row.unit, type: row.task_type ?? row.type, division: row.division ?? row.dision }))
-    .filter(t => t.task && Number.isFinite(t.cu) && t.cu > 0 && t.unit && t.type && t.division);
+  return csvRows(text).map((row, index) => { const type=row.task_type ?? row.type; return { id: startId + index, task: row.task, cu: Number(row.clinical_unit ?? row.clinicla_unit ?? row.cu), days: Number(row.days_per_task ?? row.day_value ?? row.days ?? (String(type).toLowerCase().includes("inpatient") ? 5 : .5)), unit: row.unit, type, division: row.division ?? row.dision }; })
+    .filter(t => t.task && Number.isFinite(t.cu) && t.cu > 0 && Number.isFinite(t.days) && t.days > 0 && t.unit && t.type && t.division);
 }
 function parseProviders(text: string, startId: number): Provider[] {
   return csvRows(text).map((row, index) => ({ id: startId + index, name: row.name, division: row.division ?? row.dision, effort: Number(row.clinical_effort ?? row.clinicla_effort ?? row.effort), earned: 0 }))
@@ -67,6 +67,7 @@ export default function Home() {
   const [selectedId, setSelectedId] = useState(1);
   const [quantities, setQuantities] = useState<Record<number, number>>({});
   const [cuOverrides, setCuOverrides] = useState<Record<number, number>>({});
+  const [dayOverrides, setDayOverrides] = useState<Record<number, number>>({});
   const [suggestionEnabled, setSuggestionEnabled] = useState<Record<number, boolean>>({});
   const [currentPlanId, setCurrentPlanId] = useState<number | null>(null);
   const [savedPlans, setSavedPlans] = useState<SavedPlan[]>([]);
@@ -85,15 +86,20 @@ export default function Home() {
   const assignedTasks = divisionTasks.filter(task => (quantities[task.id] ?? 0) > 0);
   const planned = assignedTasks.reduce((sum, task) => sum + (quantities[task.id] ?? 0) * (cuOverrides[task.id] ?? task.cu), 0);
   const remaining = Math.max(0, gap - planned);
+  const inpatientDays = assignedTasks.filter(task => task.type.toLowerCase().includes("inpatient")).reduce((sum,task) => sum + (quantities[task.id] ?? 0) * (dayOverrides[task.id] ?? task.days), 0);
+  const otherDays = assignedTasks.filter(task => !task.type.toLowerCase().includes("inpatient")).reduce((sum,task) => sum + (quantities[task.id] ?? 0) * (dayOverrides[task.id] ?? task.days), 0);
+  const capacityDays = 46 * 5;
+  const usedDays = inpatientDays + otherDays;
+  const capacityRemaining = Math.max(0, capacityDays - usedDays);
 
   useEffect(() => {
     fetch("/api/plans").then(response => response.ok ? response.json() : Promise.reject()).then(data => {
       const plans: SavedPlan[] = data.plans ?? []; setSavedPlans(plans);
       const provider = seedProviders[0]; const plan = plans.find(item => item.providerName === provider.name && item.division === provider.division);
       if (plan) {
-        const nextQty: Record<number, number> = {}, nextOverrides: Record<number, number> = {};
-        plan.lines.forEach(line => { const task = seedTasks.find(item => item.task === line.task && item.division === plan.division); if (task) { nextQty[task.id] = line.quantity; if (line.overridden) nextOverrides[task.id] = line.appliedCu; } });
-        setQuantities(nextQty); setCuOverrides(nextOverrides); setCurrentPlanId(plan.id);
+        const nextQty: Record<number, number> = {}, nextOverrides: Record<number, number> = {}, nextDayOverrides: Record<number,number> = {}, nextEnabled: Record<number,boolean> = {};
+        plan.lines.forEach(line => { const task = seedTasks.find(item => item.task === line.task && item.division === plan.division); if (task) { nextQty[task.id] = line.quantity; nextEnabled[task.id]=true; if (line.cuOverridden ?? line.overridden) nextOverrides[task.id] = line.appliedCu; if (line.daysOverridden) nextDayOverrides[task.id]=line.appliedDays ?? task.days; } });
+        setQuantities(nextQty); setCuOverrides(nextOverrides); setDayOverrides(nextDayOverrides); setSuggestionEnabled(nextEnabled); setCurrentPlanId(plan.id);
       }
     }).catch(() => undefined);
   }, []);
@@ -106,21 +112,21 @@ export default function Home() {
 
   const flash = (message: string) => { setNotice(message); setTimeout(() => setNotice(""), 4000); };
   const switchDivision = (next: string) => {
-    const provider = providerRoster.find(p => p.division === next); setDivision(next); setSelectedId(provider?.id ?? 0); setQuantities({}); setCuOverrides({}); setCurrentPlanId(null);
+    const provider = providerRoster.find(p => p.division === next); setDivision(next); setSelectedId(provider?.id ?? 0); setQuantities({}); setCuOverrides({}); setDayOverrides({}); setSuggestionEnabled({}); setCurrentPlanId(null);
     if (provider) loadSavedPlan(provider, next);
   };
   const loadSavedPlan = (provider: Provider, providerDivision = provider.division, plans = savedPlans) => {
     const plan = plans.find(item => item.providerName === provider.name && item.division === providerDivision);
-    const nextQty: Record<number, number> = {}, nextOverrides: Record<number, number> = {};
-    if (plan) plan.lines.forEach(line => { const task = taskLibrary.find(item => item.task === line.task && item.division === providerDivision); if (task) { nextQty[task.id] = line.quantity; if (line.overridden) nextOverrides[task.id] = line.appliedCu; } });
-    setQuantities(nextQty); setCuOverrides(nextOverrides); setCurrentPlanId(plan?.id ?? null);
+    const nextQty: Record<number, number> = {}, nextOverrides: Record<number, number> = {}, nextDayOverrides: Record<number,number> = {}, nextEnabled: Record<number,boolean> = {};
+    if (plan) plan.lines.forEach(line => { const task = taskLibrary.find(item => item.task === line.task && item.division === providerDivision); if (task) { nextQty[task.id] = line.quantity; nextEnabled[task.id]=true; if (line.cuOverridden ?? line.overridden) nextOverrides[task.id] = line.appliedCu; if (line.daysOverridden) nextDayOverrides[task.id]=line.appliedDays ?? task.days; } });
+    setQuantities(nextQty); setCuOverrides(nextOverrides); setDayOverrides(nextDayOverrides); setSuggestionEnabled(nextEnabled); setCurrentPlanId(plan?.id ?? null);
   };
   const selectProvider = (provider: Provider) => { setSelectedId(provider.id); loadSavedPlan(provider); };
   const savePlan = async () => {
     if (!selected || planned < target || saving) return;
     const lines: PlanLine[] = assignedTasks.map(task => {
-      const appliedCu = cuOverrides[task.id] ?? task.cu; const quantity = quantities[task.id] ?? 0;
-      return { task: task.task, unit: task.unit, type: task.type, quantity, libraryCu: task.cu, appliedCu, totalCu: quantity * appliedCu, overridden: appliedCu !== task.cu };
+      const appliedCu = cuOverrides[task.id] ?? task.cu, appliedDays = dayOverrides[task.id] ?? task.days; const quantity = quantities[task.id] ?? 0;
+      return { task: task.task, unit: task.unit, type: task.type, quantity, libraryCu: task.cu, appliedCu, totalCu: quantity * appliedCu, libraryDays: task.days, appliedDays, totalDays: quantity * appliedDays, cuOverridden: appliedCu !== task.cu, daysOverridden: appliedDays !== task.days, overridden: appliedCu !== task.cu || appliedDays !== task.days };
     });
     setSaving(true);
     try {
@@ -140,17 +146,18 @@ export default function Home() {
     reader.readAsText(file); event.target.value = "";
   };
 
-  const proposalTasks = divisionTasks.filter(task => suggestionEnabled[task.id] ?? true).sort((a, b) => (cuOverrides[b.id] ?? b.cu) - (cuOverrides[a.id] ?? a.cu)).slice(0, 2);
+  const proposalTasks = divisionTasks.filter(task => suggestionEnabled[task.id] ?? false).sort((a, b) => (cuOverrides[b.id] ?? b.cu) - (cuOverrides[a.id] ?? a.cu));
+  const displayTasks = [...divisionTasks].sort((a,b) => Number(suggestionEnabled[b.id] ?? false) - Number(suggestionEnabled[a.id] ?? false));
   const savedPlanBeingEdited = savedPlans.find(plan => plan.id === currentPlanId);
   const editPlan = (plan: SavedPlan) => {
     let nextProviders = providerRoster; let provider = providerRoster.find(item => item.name === plan.providerName && item.division === plan.division);
     if (!provider) { provider = { id: Math.max(0,...providerRoster.map(item => item.id)) + 1, name: plan.providerName, division: plan.division, effort: plan.clinicalEffort, earned: 0 }; nextProviders = [...providerRoster, provider]; setProviderRoster(nextProviders); }
     let nextTasks = [...taskLibrary];
-    plan.lines.forEach(line => { if (!nextTasks.some(task => task.task === line.task && task.division === plan.division)) nextTasks.push({ id: Math.max(0,...nextTasks.map(task => task.id)) + 1, task: line.task, division: plan.division, unit: line.unit, type: line.type ?? "Saved activity", cu: line.libraryCu }); });
+    plan.lines.forEach(line => { if (!nextTasks.some(task => task.task === line.task && task.division === plan.division)) nextTasks.push({ id: Math.max(0,...nextTasks.map(task => task.id)) + 1, task: line.task, division: plan.division, unit: line.unit, type: line.type ?? "Saved activity", cu: line.libraryCu, days: line.libraryDays ?? (line.type?.toLowerCase().includes("inpatient") ? 5 : .5) }); });
     if (nextTasks.length !== taskLibrary.length) setTaskLibrary(nextTasks);
-    const nextQty: Record<number,number> = {}, nextOverrides: Record<number,number> = {};
-    plan.lines.forEach(line => { const task=nextTasks.find(item => item.task === line.task && item.division === plan.division); if (task) { nextQty[task.id]=line.quantity; if (line.overridden) nextOverrides[task.id]=line.appliedCu; } });
-    setDivision(plan.division); setSelectedId(provider.id); setQuantities(nextQty); setCuOverrides(nextOverrides); setCurrentPlanId(plan.id); setTab("calculator");
+    const nextQty: Record<number,number> = {}, nextOverrides: Record<number,number> = {}, nextDayOverrides: Record<number,number> = {}, nextEnabled: Record<number,boolean> = {};
+    plan.lines.forEach(line => { const task=nextTasks.find(item => item.task === line.task && item.division === plan.division); if (task) { nextQty[task.id]=line.quantity; nextEnabled[task.id]=true; if (line.cuOverridden ?? line.overridden) nextOverrides[task.id]=line.appliedCu; if (line.daysOverridden) nextDayOverrides[task.id]=line.appliedDays ?? task.days; } });
+    setDivision(plan.division); setSelectedId(provider.id); setQuantities(nextQty); setCuOverrides(nextOverrides); setDayOverrides(nextDayOverrides); setSuggestionEnabled(nextEnabled); setCurrentPlanId(plan.id); setTab("calculator");
   };
 
   return <main>
@@ -178,7 +185,7 @@ export default function Home() {
 
       {tab === "calculator" && <div className="calculator-grid">
         <section className="panel calc-main">
-          <div className="calc-title"><div><div className="eyebrow">Clinical unit calculator</div><h2>Build a full provider plan</h2><p>Start at zero and assign activities until the effort-adjusted target is met.</p></div><button className="text-button" onClick={() => { setQuantities({}); setCuOverrides({}); }}>Clear plan</button></div>
+          <div className="calc-title"><div><div className="eyebrow">Clinical unit calculator</div><h2>Build a full provider plan</h2><p>Balance the effort-adjusted CU target against 46 working weeks of capacity.</p></div><button className="text-button" onClick={() => { setQuantities({}); setCuOverrides({}); setDayOverrides({}); setSuggestionEnabled({}); }}>Clear plan</button></div>
           <div className="selection-flow">
             <label><span>1</span><b>Division</b><select value={division} onChange={e => switchDivision(e.target.value)}>{divisions.map(d => <option key={d}>{d}</option>)}</select></label>
             <div className="flow-arrow">→</div>
@@ -188,26 +195,27 @@ export default function Home() {
             <div className="target-strip"><div className="selected-person"><i>{initials(selected.name)}</i><div><b>{selected.name}</b><small>{selected.effort}% clinical effort</small></div></div><div><span>Saved planned total</span><b>{savedPlanBeingEdited ? `${savedPlanBeingEdited.plannedCu.toFixed(1)} CU` : "No saved plan"}</b></div><div><span>CU target</span><b>{target}</b></div><div className="gap-box"><span>Still to assign</span><b>{remaining.toFixed(1)}</b></div></div>
             <div className="assign-block"><div><div className="eyebrow">3 · Plan activities</div><h3>{currentPlanId ? `Edit ${selected.name}’s saved plan` : `Build ${selected.name}’s plan`}</h3><p>All {division} tasks are shown. Quantities start at zero; checkboxes control proposal eligibility.</p></div><div className="proposal-key"><span className="mini-check">✓</span><b>Include in proposals</b><small>Uncheck any task the provider cannot perform.</small></div></div>
             <div className="assignment-list">
-              {divisionTasks.map(task => { const qty = quantities[task.id] ?? 0, appliedCu = cuOverrides[task.id] ?? task.cu, overridden = appliedCu !== task.cu, enabled = suggestionEnabled[task.id] ?? true; return <div className={`assignment ${qty > 0 ? "in-plan" : ""}`} key={task.id}><label className="suggest-check"><input type="checkbox" checked={enabled} onChange={e => setSuggestionEnabled({...suggestionEnabled,[task.id]:e.target.checked})}/><span>✓</span></label><div className="task-name"><b>{task.task}</b><small>{task.type} · library value {task.cu} CU/{task.unit}</small></div><label className={`rate-edit ${overridden ? "changed" : ""}`}><span>{overridden ? "TEMP VALUE" : "CU / UNIT"}</span><input aria-label={`${task.task} temporary CU value`} type="number" min="0.01" step="0.01" value={appliedCu} onFocus={e => e.currentTarget.select()} onChange={e => { const value=e.target.value; setCuOverrides({...cuOverrides,[task.id]:value === "" ? task.cu : Math.max(.01,Number(value))}); }}/></label><div className="stepper"><button onClick={() => setQuantities({...quantities,[task.id]:Math.max(0,qty-1)})}>−</button><input aria-label={`${task.task} units`} inputMode="numeric" type="number" min="0" placeholder="0" value={qty === 0 ? "" : qty} onChange={e => setQuantities({...quantities,[task.id]:e.target.value === "" ? 0 : Math.max(0,Number(e.target.value))})}/><button onClick={() => setQuantities({...quantities,[task.id]:qty+1})}>+</button></div><div className="task-total"><b>{(qty*appliedCu).toFixed(1)}</b><small>CU</small></div></div> })}
+              {displayTasks.map(task => { const qty = quantities[task.id] ?? 0, appliedCu = cuOverrides[task.id] ?? task.cu, appliedDays = dayOverrides[task.id] ?? task.days, cuChanged = appliedCu !== task.cu, daysChanged = appliedDays !== task.days, enabled = suggestionEnabled[task.id] ?? false; return <div className={`assignment ${qty > 0 ? "in-plan" : ""} ${enabled ? "enabled" : ""}`} key={task.id}><label className="suggest-check"><input type="checkbox" checked={enabled} onChange={e => setSuggestionEnabled({...suggestionEnabled,[task.id]:e.target.checked})}/><span>✓</span></label><div className="task-name"><b>{task.task}</b><small>{task.type} · {task.unit}</small></div><label className={`rate-edit ${cuChanged ? "changed" : ""}`}><span>{cuChanged ? "TEMP CU" : "CU / UNIT"}</span><input aria-label={`${task.task} temporary CU value`} type="number" min="0.01" step="0.01" value={appliedCu} onFocus={e => e.currentTarget.select()} onChange={e => { const value=e.target.value; setCuOverrides({...cuOverrides,[task.id]:value === "" ? task.cu : Math.max(.01,Number(value))}); }}/></label><label className={`rate-edit day-edit ${daysChanged ? "changed" : ""}`}><span>{daysChanged ? "TEMP DAYS" : "DAYS / UNIT"}</span><input aria-label={`${task.task} temporary day value`} type="number" min="0.5" step="0.5" value={appliedDays} onFocus={e => e.currentTarget.select()} onChange={e => { const value=e.target.value; setDayOverrides({...dayOverrides,[task.id]:value === "" ? task.days : Math.max(.5,Number(value))}); }}/></label><div className="stepper"><button onClick={() => setQuantities({...quantities,[task.id]:Math.max(0,qty-1)})}>−</button><input aria-label={`${task.task} units`} inputMode="numeric" type="number" min="0" placeholder="0" value={qty === 0 ? "" : qty} onChange={e => setQuantities({...quantities,[task.id]:e.target.value === "" ? 0 : Math.max(0,Number(e.target.value))})}/><button onClick={() => setQuantities({...quantities,[task.id]:qty+1})}>+</button></div><div className="task-total"><b>{(qty*appliedCu).toFixed(1)} CU</b><small>{(qty*appliedDays).toFixed(1)} days</small></div></div> })}
             </div>
           </> : <div className="empty-plan"><b>No providers in this division</b><p>Import the provider roster to begin.</p></div>}
         </section>
         <aside className="calc-aside">
-          {selected && <section className="result-card"><div className="eyebrow">Plan completeness</div><div className="ring" style={{"--pct":`${target ? Math.min(100,planned/target*100) : 0}%`} as React.CSSProperties}><div><strong>{target ? Math.round(planned/target*100) : 0}%</strong><span>of target</span></div></div><div className="result-row"><span>{currentPlanId ? "Saved plan" : "Planned total"}</span><b>{planned.toFixed(1)} CU</b></div><div className="result-row total"><span>{remaining ? "Still needed" : "Target reached"}</span><b>{remaining ? `${remaining.toFixed(1)} CU` : "✓"}</b></div><button className="primary" disabled={planned < target || saving} onClick={savePlan}>{saving ? "Saving…" : planned < target ? "Complete plan to save" : currentPlanId ? "Save plan changes" : "Approve & save plan"}</button>{Object.keys(cuOverrides).some(id => cuOverrides[Number(id)] !== taskLibrary.find(t => t.id === Number(id))?.cu) && <div className="override-warning">⚑ Temporary CU values will be flagged in the saved record.</div>}</section>}
-          {selected && remaining > 0 && <section className="proposals"><div className="proposal-head"><div className="bulb">✦</div><div><div className="eyebrow">Proposed methods</div><h3>Ways to close {remaining.toFixed(1)} CU</h3></div></div><p>Only checked tasks are considered. Select an option to add it to the plan.</p>{proposalTasks.length ? proposalTasks.map(task => { const rate=cuOverrides[task.id] ?? task.cu, count = Math.ceil(remaining / rate); return <button className="proposal" key={task.id} onClick={() => setQuantities({...quantities,[task.id]:(quantities[task.id] ?? 0)+count})}><span><b>{count} {plural(task.unit,count)}</b><small>{task.task}</small></span><strong>+{(count*rate).toFixed(1)} CU</strong><i>Use plan →</i></button> }) : <small>Enable at least one division task to generate options.</small>}</section>}
+          {selected && <section className="result-card"><div className="eyebrow">Plan completeness</div><div className="ring" style={{"--pct":`${target ? Math.min(100,planned/target*100) : 0}%`} as React.CSSProperties}><div><strong>{target ? Math.round(planned/target*100) : 0}%</strong><span>of target</span></div></div><div className="result-row"><span>{currentPlanId ? "Saved plan" : "Planned total"}</span><b>{planned.toFixed(1)} CU</b></div><div className="result-row total"><span>{remaining ? "Still needed" : "Target reached"}</span><b>{remaining ? `${remaining.toFixed(1)} CU` : "✓"}</b></div><button className="primary" disabled={planned < target || saving} onClick={savePlan}>{saving ? "Saving…" : planned < target ? "Complete plan to save" : currentPlanId ? "Save plan changes" : "Approve & save plan"}</button>{(Object.keys(cuOverrides).some(id => cuOverrides[Number(id)] !== taskLibrary.find(t => t.id === Number(id))?.cu) || Object.keys(dayOverrides).some(id => dayOverrides[Number(id)] !== taskLibrary.find(t => t.id === Number(id))?.days)) && <div className="override-warning">⚑ Temporary CU or day values will be flagged in the saved record.</div>}</section>}
+          {selected && <section className={`burn-card ${usedDays > capacityDays ? "over" : ""}`}><div className="burn-head"><div><div className="eyebrow">Annual capacity burn</div><h3>{capacityRemaining.toFixed(1)} days open</h3></div><strong>{(usedDays/5).toFixed(1)} / 46 <small>work weeks</small></strong></div><div className="year-bar"><i className="vacation" style={{width:`${6/52*100}%`}}/><i className="inpatient-burn" style={{width:`${Math.min(inpatientDays,capacityDays)/260*100}%`}}/><i className="other-burn" style={{width:`${Math.min(otherDays,Math.max(0,capacityDays-inpatientDays))/260*100}%`}}/></div><div className="year-scale"><span>52-week year</span><span>6 weeks protected · 46 available</span></div><div className="burn-legend"><span><i className="vacation"/>Vacation & CME <b>6 wk</b></span><span><i className="inpatient-burn"/>Inpatient <b>{(inpatientDays/5).toFixed(1)} wk</b></span><span><i className="other-burn"/>Other clinical <b>{(otherDays/5).toFixed(1)} wk</b></span></div>{usedDays > capacityDays && <div className="capacity-alert">Capacity exceeded by {(usedDays-capacityDays).toFixed(1)} days</div>}</section>}
+          {selected && remaining > 0 && <section className="proposals"><div className="proposal-head"><div className="bulb">✦</div><div><div className="eyebrow">Proposed methods</div><h3>Ways to close {remaining.toFixed(1)} CU</h3></div></div><p>Every enabled task is shown. Select an option to add it to the plan.</p>{proposalTasks.length ? proposalTasks.map(task => { const rate=cuOverrides[task.id] ?? task.cu, dayRate=dayOverrides[task.id] ?? task.days, count = Math.ceil(remaining / rate); return <button className="proposal" key={task.id} onClick={() => setQuantities({...quantities,[task.id]:(quantities[task.id] ?? 0)+count})}><span><b>{count} {plural(task.unit,count)}</b><small>{task.task} · {(count*dayRate).toFixed(1)} days</small></span><strong>+{(count*rate).toFixed(1)} CU</strong><i>Use plan →</i></button> }) : <small>Enable at least one division task to generate options.</small>}</section>}
         </aside>
       </div>}
 
       {tab === "approved" && <section className="approved-view">
         <div className="records-head"><div><div className="eyebrow">Saved records</div><h2>Approved provider plans</h2><p>Complete CU plans with a permanent record of any temporary rate adjustments.</p></div><button className="primary" onClick={() => setTab("calculator")}>＋ Build new plan</button></div>
         {savedPlans.length ? <div className="plan-records">{savedPlans.map(plan => <article className="plan-record" key={plan.id}>
-          <div className="record-top"><div className="record-person"><i>{initials(plan.providerName)}</i><div><h3>{plan.providerName}</h3><p>{plan.division} · {plan.clinicalEffort}% clinical effort</p></div></div><div className="record-badges"><span className="approved-badge">✓ Approved</span>{plan.hasOverrides && <span className="override-badge">⚑ Temp CU value</span>}</div></div>
+          <div className="record-top"><div className="record-person"><i>{initials(plan.providerName)}</i><div><h3>{plan.providerName}</h3><p>{plan.division} · {plan.clinicalEffort}% clinical effort</p></div></div><div className="record-badges"><span className="approved-badge">✓ Approved</span>{plan.hasOverrides && <span className="override-badge">⚑ Temporary value</span>}</div></div>
           <div className="record-metrics"><div><span>Target</span><b>{plan.targetCu} CU</b></div><div><span>Planned</span><b>{plan.plannedCu.toFixed(1)} CU</b></div><div><span>Saved</span><b>{new Date(plan.createdAt).toLocaleDateString()}</b></div><button className="edit-record" onClick={() => editPlan(plan)}>Edit in calculator →</button></div>
-          <div className="record-lines">{plan.lines.map((line, index) => <div key={`${line.task}-${index}`}><span><b>{line.task}</b><small>{line.quantity} {plural(line.unit,line.quantity)}</small></span><span className={line.overridden ? "flagged-rate" : ""}>{line.appliedCu} CU/{line.unit}{line.overridden && <small>Library: {line.libraryCu} · Temporary override</small>}</span><strong>{line.totalCu.toFixed(1)} CU</strong></div>)}</div>
+          <div className="record-lines">{plan.lines.map((line, index) => <div key={`${line.task}-${index}`}><span><b>{line.task}</b><small>{line.quantity} {plural(line.unit,line.quantity)}</small></span><span className={line.overridden ? "flagged-rate" : ""}>{line.appliedCu} CU · {line.appliedDays ?? "—"} days/{line.unit}{line.overridden && <small>Library: {line.libraryCu} CU · {line.libraryDays ?? "—"} days</small>}</span><strong>{line.totalCu.toFixed(1)} CU<small>{line.totalDays?.toFixed(1) ?? "—"} days</small></strong></div>)}</div>
         </article>)}</div> : <div className="panel empty-records"><div>✓</div><h3>No approved plans yet</h3><p>Build a provider’s full plan to their target, then approve and save it here.</p><button className="primary" onClick={() => setTab("calculator")}>Open calculator</button></div>}
       </section>}
 
-      {tab === "library" && <section className="panel library"><div className="panelhead"><div><h2>Clinical task library</h2><p>Tasks available to the {division} calculator</p></div><div className="library-actions"><input placeholder="Search tasks" value={search} onChange={e => setSearch(e.target.value)}/><button className="primary" onClick={() => taskFileRef.current?.click()}>Import task CSV</button></div></div><div className="schema-note"><b>Required CSV columns</b><span>Task</span><span>Clinical unit</span><span>Unit</span><span>Task type</span><span>Division</span></div><div className="task-table"><div className="task-row labels"><span>Task</span><span>CU value</span><span>Unit</span><span>Task type</span><span>Division</span></div>{divisionTasks.filter(t => t.task.toLowerCase().includes(search.toLowerCase())).map(t => <div className="task-row" key={t.id}><span><b>{t.task}</b></span><span className="cu-pill">{t.cu}</span><span>{t.unit}</span><span>{t.type}</span><span>{t.division}</span></div>)}</div></section>}
+      {tab === "library" && <section className="panel library"><div className="panelhead"><div><h2>Clinical task library</h2><p>CU and capacity values available to the {division} calculator</p></div><div className="library-actions"><input placeholder="Search tasks" value={search} onChange={e => setSearch(e.target.value)}/><button className="primary" onClick={() => taskFileRef.current?.click()}>Import task CSV</button></div></div><div className="schema-note"><b>Required CSV columns</b><span>Task</span><span>Clinical unit</span><span>Days per task</span><span>Unit</span><span>Task type</span><span>Division</span></div><div className="task-table"><div className="task-row labels"><span>Task</span><span>CU value</span><span>Days</span><span>Unit</span><span>Task type</span><span>Division</span></div>{divisionTasks.filter(t => t.task.toLowerCase().includes(search.toLowerCase())).map(t => <div className="task-row" key={t.id}><span><b>{t.task}</b></span><span className="cu-pill">{t.cu}</span><span className="day-pill">{t.days}</span><span>{t.unit}</span><span>{t.type}</span><span>{t.division}</span></div>)}</div></section>}
 
       {tab === "providers" && <section className="panel roster"><div className="panelhead"><div><h2>Provider roster</h2><p>Doctors available to the {division} calculator · every provider starts at 0 CU</p></div><button className="primary" onClick={() => providerFileRef.current?.click()}>Import provider CSV</button></div><div className="schema-note"><b>Required CSV columns</b><span>Name</span><span>Division</span><span>Clinical effort</span></div><ProviderTable providers={divisionProviders} approvedPlans={savedPlans} onPlan={p => { selectProvider(p); setTab("calculator"); }}/></section>}
     </section>
