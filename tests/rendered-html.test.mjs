@@ -31,6 +31,11 @@ test("keeps adjusted-FTE and day-capacity rules in the calculator", async () => 
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
 
   assert.match(page, /Adjusted FTE/);
+  assert.match(page, /Enter percentage/);
+  assert.match(page, /Worked date range/);
+  assert.match(page, /Weeks not working/);
+  assert.match(page, /\/ 364/);
+  assert.match(page, /\(52-weeks\)\/52/);
   assert.match(page, /BASE_TARGET \* effort \/ 100 \* adjustedFte/);
   assert.match(page, /260 \* selected\.effort \/ 100 \* appliedAdjustedFte/);
   assert.match(page, /isProcedural\(task\) \? \.5/);

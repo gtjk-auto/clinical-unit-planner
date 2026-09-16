@@ -1,0 +1,1 @@
+ALTER TABLE `approved_plans` ADD `adjusted_fte_enabled` integer DEFAULT false NOT NULL;
