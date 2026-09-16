@@ -15,6 +15,13 @@
       "when": 1789083061114,
       "tag": "0001_strange_legion",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1789516861837,
+      "tag": "0002_magenta_spencer_smythe",
+      "breakpoints": true
     }
   ]
 }

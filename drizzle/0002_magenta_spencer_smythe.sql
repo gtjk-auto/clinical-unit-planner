@@ -1,0 +1,1 @@
+ALTER TABLE `approved_plans` ADD `vacation_weeks` integer DEFAULT 600 NOT NULL;
