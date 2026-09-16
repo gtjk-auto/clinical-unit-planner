@@ -8,6 +8,7 @@ export const approvedPlans = sqliteTable("approved_plans", {
   targetCu: integer("target_cu").notNull(),
   plannedCu: integer("planned_cu").notNull(),
   vacationWeeks: integer("vacation_weeks").notNull().default(600),
+  adjustedFte: integer("adjusted_fte").notNull().default(100),
   hasOverrides: integer("has_overrides", { mode: "boolean" }).notNull().default(false),
   planJson: text("plan_json").notNull(),
   status: text("status").notNull().default("approved"),
