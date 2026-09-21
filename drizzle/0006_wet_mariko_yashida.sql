@@ -1,0 +1,1 @@
+ALTER TABLE `approved_plans` ADD `vacation_cme_enabled` integer DEFAULT true NOT NULL;

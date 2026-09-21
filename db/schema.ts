@@ -8,6 +8,7 @@ export const approvedPlans = sqliteTable("approved_plans", {
   targetCu: integer("target_cu").notNull(),
   plannedCu: integer("planned_cu").notNull(),
   vacationWeeks: integer("vacation_weeks").notNull().default(600),
+  vacationCmeEnabled: integer("vacation_cme_enabled", { mode: "boolean" }).notNull().default(true),
   adjustedFte: integer("adjusted_fte").notNull().default(100),
   adjustedFteBasisPoints: integer("adjusted_fte_basis_points"),
   adjustedFteEnabled: integer("adjusted_fte_enabled", { mode: "boolean" }).notNull().default(false),

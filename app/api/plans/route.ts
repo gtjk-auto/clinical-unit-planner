@@ -13,7 +13,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json() as { id?: number; providerName?: string; division?: string; clinicalEffort?: number; adjustedFte?: number; adjustedFteEnabled?: boolean; adjustedFteMethod?: "direct" | "dates" | "leave"; workedStartDate?: string | null; workedEndDate?: string | null; weeksNotWorking?: number; targetCu?: number; plannedCu?: number; hasOverrides?: boolean; lines?: unknown[] };
+    const body = await request.json() as { id?: number; providerName?: string; division?: string; clinicalEffort?: number; adjustedFte?: number; adjustedFteEnabled?: boolean; adjustedFteMethod?: "direct" | "dates" | "leave"; workedStartDate?: string | null; workedEndDate?: string | null; weeksNotWorking?: number; vacationCmeEnabled?: boolean; vacationWeeks?: number; targetCu?: number; plannedCu?: number; hasOverrides?: boolean; lines?: unknown[] };
     if (!body.providerName || !body.division || !body.targetCu || !Array.isArray(body.lines) || !body.lines.length) return Response.json({ error: "A complete provider plan is required" }, { status: 400 });
     if ((body.plannedCu ?? 0) < body.targetCu) return Response.json({ error: "The plan must meet the CU target" }, { status: 400 });
     const method=body.adjustedFteMethod ?? "direct";
@@ -28,11 +28,12 @@ export async function POST(request: Request) {
     }
     const calculatedTarget=Math.round(460*(body.clinicalEffort ?? 0)/100*adjustedFte);
     if (calculatedTarget !== body.targetCu) return Response.json({ error: "The CU target does not match the adjusted FTE" }, { status: 400 });
-    const values = { providerName: body.providerName, division: body.division, clinicalEffort: body.clinicalEffort ?? 0, targetCu: body.targetCu, plannedCu: Math.round((body.plannedCu ?? 0) * 100), adjustedFte: Math.round(adjustedFte * 100), adjustedFteBasisPoints: Math.round(adjustedFte * 10000), adjustedFteEnabled: Boolean(body.adjustedFteEnabled), adjustedFteMethod: method, workedStartDate: body.workedStartDate ?? null, workedEndDate: body.workedEndDate ?? null, weeksNotWorking: Math.round((body.weeksNotWorking ?? 0) * 100), hasOverrides: Boolean(body.hasOverrides), planJson: JSON.stringify(body.lines), createdAt: new Date().toISOString() };
+    const vacationWeeks=Math.min(52,Math.max(0,body.vacationWeeks ?? 6));
+    const values = { providerName: body.providerName, division: body.division, clinicalEffort: body.clinicalEffort ?? 0, targetCu: body.targetCu, plannedCu: Math.round((body.plannedCu ?? 0) * 100), vacationWeeks: Math.round(vacationWeeks * 100), vacationCmeEnabled: body.vacationCmeEnabled ?? true, adjustedFte: Math.round(adjustedFte * 100), adjustedFteBasisPoints: Math.round(adjustedFte * 10000), adjustedFteEnabled: Boolean(body.adjustedFteEnabled), adjustedFteMethod: method, workedStartDate: body.workedStartDate ?? null, workedEndDate: body.workedEndDate ?? null, weeksNotWorking: Math.round((body.weeksNotWorking ?? 0) * 100), hasOverrides: Boolean(body.hasOverrides), planJson: JSON.stringify(body.lines), createdAt: new Date().toISOString() };
     const [plan] = body.id
       ? await getDb().update(approvedPlans).set(values).where(eq(approvedPlans.id, body.id)).returning()
       : await getDb().insert(approvedPlans).values(values).returning();
-    return Response.json({ plan: { ...plan, plannedCu: body.plannedCu, adjustedFte, adjustedFteEnabled: Boolean(body.adjustedFteEnabled), adjustedFteMethod: method, workedStartDate: body.workedStartDate ?? null, workedEndDate: body.workedEndDate ?? null, weeksNotWorking: body.weeksNotWorking ?? 0, lines: body.lines } }, { status: 201 });
+    return Response.json({ plan: { ...plan, plannedCu: body.plannedCu, vacationWeeks, vacationCmeEnabled: body.vacationCmeEnabled ?? true, adjustedFte, adjustedFteEnabled: Boolean(body.adjustedFteEnabled), adjustedFteMethod: method, workedStartDate: body.workedStartDate ?? null, workedEndDate: body.workedEndDate ?? null, weeksNotWorking: body.weeksNotWorking ?? 0, lines: body.lines } }, { status: 201 });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Unable to save plan" }, { status: 500 });
   }
