@@ -45,3 +45,17 @@ test("keeps adjusted-FTE and cadence rules isolated in the calculator", async ()
   assert.match(page, /COUNT · \{countUnit\(task\)\}/);
   assert.doesNotMatch(page, /Annual clinical capacity/);
 });
+
+test("supports completed-plan CSV export and round-trip import", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /Export all CSV/);
+  assert.match(page, /Import completed plans/);
+  assert.match(page, /Download CSV/);
+  assert.match(page, /PLAN_CSV_HEADERS/);
+  assert.match(page, /downloadPlansCsv/);
+  assert.match(page, /const importCompletedPlans/);
+  assert.match(page, /Use a completed-plan CSV exported from this tool/);
+  assert.match(page, /plannedCu < targetCu/);
+  assert.match(page, /existing\?\.id/);
+});

@@ -54,15 +54,38 @@ const adjustedFromDateRange = (start: string, end: string) => {
   return Math.min(1, Math.max(0, ((last-first)/86400000+1) / 364));
 };
 
+const PLAN_CSV_HEADERS = ["provider_name","division","clinical_effort","adjusted_fte_enabled","adjusted_fte_method","adjusted_fte","worked_start_date","worked_end_date","weeks_not_working","vacation_cme_enabled","vacation_cme_weeks","cu_target","planned_cu","status","task","task_type","unit","quantity","library_cu","applied_cu","total_cu","library_days","applied_days","total_days","library_service_days_per_week","applied_service_days_per_week","cu_overridden","days_overridden","service_days_overridden","has_any_override"];
+const csvCell = (value: unknown) => {
+  const text=value == null ? "" : String(value);
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g,'""')}"` : text;
+};
+const downloadPlansCsv = (plans: SavedPlan[], filename: string) => {
+  const rows = plans.flatMap(plan => plan.lines.map(line => [plan.providerName,plan.division,plan.clinicalEffort,Boolean(plan.adjustedFteEnabled),plan.adjustedFteMethod ?? "direct",plan.adjustedFte ?? 1,plan.workedStartDate ?? "",plan.workedEndDate ?? "",plan.weeksNotWorking ?? 0,plan.vacationCmeEnabled ?? true,plan.vacationWeeks ?? 6,plan.targetCu,plan.plannedCu,plan.status,line.task,line.type ?? "",line.unit,line.quantity,line.libraryCu,line.appliedCu,line.totalCu,line.libraryDays ?? "",line.appliedDays ?? "",line.totalDays ?? "",line.libraryServiceWeekDays ?? "",line.appliedServiceWeekDays ?? "",Boolean(line.cuOverridden),Boolean(line.daysOverridden),Boolean(line.serviceWeekDaysOverridden),Boolean(line.overridden)]));
+  const csv=[PLAN_CSV_HEADERS.join(","),...rows.map(row => row.map(csvCell).join(","))].join("\r\n");
+  const url=URL.createObjectURL(new Blob([`\uFEFF${csv}`],{type:"text/csv;charset=utf-8"}));
+  const link=document.createElement("a"); link.href=url; link.download=filename; document.body.appendChild(link); link.click(); link.remove(); window.setTimeout(() => URL.revokeObjectURL(url),0);
+};
+const parseCsv = (text: string) => {
+  const rows: string[][]=[]; let row: string[]=[], cell="", quoted=false;
+  for (let i=0;i<text.length;i++) { const char=text[i], next=text[i+1];
+    if (char === '"' && quoted && next === '"') { cell+='"'; i++; }
+    else if (char === '"') quoted=!quoted;
+    else if (char === "," && !quoted) { row.push(cell); cell=""; }
+    else if ((char === "\n" || char === "\r") && !quoted) { if (char === "\r" && next === "\n") i++; row.push(cell); if (row.some(value => value.trim())) rows.push(row); row=[]; cell=""; }
+    else cell+=char;
+  }
+  row.push(cell); if (row.some(value => value.trim())) rows.push(row);
+  return rows;
+};
+
 function csvRows(text: string) {
-  const lines = text.trim().split(/\r?\n/).filter(Boolean);
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(",").map(h => h.trim().toLowerCase().replace(/\s+/g, "_").replace(/clinical/g, "clinical"));
-  return lines.slice(1).map(line => {
-    const values = line.match(/("[^"]*"|[^,]+)/g)?.map(v => v.replace(/^"|"$/g, "").trim()) ?? [];
-    return Object.fromEntries(headers.map((h, i) => [h, values[i] ?? ""]));
-  });
+  const rows=parseCsv(text.replace(/^\uFEFF/,""));
+  if (rows.length < 2) return [];
+  const headers = rows[0].map(h => h.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g,""));
+  return rows.slice(1).map(values => Object.fromEntries(headers.map((h, i) => [h, values[i]?.trim() ?? ""])));
 }
+const csvNumber = (value: string | undefined, fallback=0) => { const parsed=Number(value); return Number.isFinite(parsed) ? parsed : fallback; };
+const csvBoolean = (value: string | undefined, fallback=false) => value == null || value === "" ? fallback : /^(true|1|yes|y)$/i.test(value.trim());
 function parseTasks(text: string, startId: number): Task[] {
   return csvRows(text).map((row, index) => {
     const type=row.task_type ?? row.type, inpatient=String(type).toLowerCase().includes("inpatient");
@@ -98,10 +121,12 @@ export default function Home() {
   const [currentPlanId, setCurrentPlanId] = useState<number | null>(null);
   const [savedPlans, setSavedPlans] = useState<SavedPlan[]>([]);
   const [saving, setSaving] = useState(false);
+  const [importingPlans, setImportingPlans] = useState(false);
   const [search, setSearch] = useState("");
   const [notice, setNotice] = useState("");
   const taskFileRef = useRef<HTMLInputElement>(null);
   const providerFileRef = useRef<HTMLInputElement>(null);
+  const completedPlanFileRef = useRef<HTMLInputElement>(null);
 
   const divisions = [...new Set([...providerRoster.map(p => p.division), ...taskLibrary.map(t => t.division)])].sort();
   const divisionProviders = providerRoster.filter(p => p.division === division);
@@ -187,6 +212,51 @@ export default function Home() {
     reader.onload = () => { const parsed = parseProviders(String(reader.result), providerRoster.length + 1); parsed.length ? (setProviderRoster([...providerRoster, ...parsed]), setDivision(parsed[0].division), setSelectedId(parsed[0].id), setQuantities({}), setCuOverrides({}), setDayOverrides({}), setServiceWeekOverrides({}), resetAdjustedFte(), resetVacationCme(), flash(`${parsed.length} provider${parsed.length === 1 ? "" : "s"} added`), setTab("providers")) : flash("No valid providers found. Check Name, Division, and Clinical effort."); };
     reader.readAsText(file); event.target.value = "";
   };
+  const importCompletedPlans = (event: ChangeEvent<HTMLInputElement>) => {
+    const file=event.target.files?.[0]; if (!file || importingPlans) return; const reader=new FileReader(); setImportingPlans(true);
+    reader.onload = async () => {
+      try {
+        const rows=csvRows(String(reader.result));
+        const required=["provider_name","division","clinical_effort","task","unit","quantity","library_cu","applied_cu"];
+        if (!rows.length || required.some(header => !(header in rows[0]))) throw new Error("Use a completed-plan CSV exported from this tool.");
+        const grouped=new Map<string,typeof rows>();
+        rows.forEach(row => { const key=`${row.provider_name?.trim()}::${row.division?.trim()}`; if (!grouped.has(key)) grouped.set(key,[]); grouped.get(key)?.push(row); });
+        const imported: SavedPlan[]=[]; const failures: string[]=[];
+        for (const group of grouped.values()) {
+          const first=group[0], providerName=first.provider_name?.trim(), planDivision=first.division?.trim(), clinicalEffort=csvNumber(first.clinical_effort,-1);
+          if (!providerName || !planDivision || clinicalEffort < 0 || clinicalEffort > 100) { failures.push(providerName || "Unnamed provider"); continue; }
+          const adjustedFteEnabled=csvBoolean(first.adjusted_fte_enabled,false), rawMethod=first.adjusted_fte_method;
+          const adjustedFteMethod: FteMethod=rawMethod === "dates" || rawMethod === "leave" ? rawMethod : "direct";
+          const workedStartDate=first.worked_start_date || null, workedEndDate=first.worked_end_date || null, weeksNotWorking=Math.min(52,Math.max(0,csvNumber(first.weeks_not_working,0)));
+          let importedAdjustedFte=adjustedFteEnabled ? Math.min(1,Math.max(0,csvNumber(first.adjusted_fte,1))) : 1;
+          if (adjustedFteEnabled && adjustedFteMethod === "dates") importedAdjustedFte=adjustedFromDateRange(workedStartDate ?? "",workedEndDate ?? "");
+          if (adjustedFteEnabled && adjustedFteMethod === "leave") importedAdjustedFte=(52-weeksNotWorking)/52;
+          const lines: PlanLine[]=group.map(row => {
+            const quantity=Math.max(0,csvNumber(row.quantity)), libraryCu=Math.max(.01,csvNumber(row.library_cu)), appliedCu=Math.max(.01,csvNumber(row.applied_cu,libraryCu));
+            const libraryDays=row.library_days === "" ? undefined : csvNumber(row.library_days), appliedDays=row.applied_days === "" ? libraryDays : csvNumber(row.applied_days,libraryDays ?? 0);
+            const libraryServiceWeekDays=row.library_service_days_per_week === "" ? undefined : csvNumber(row.library_service_days_per_week), appliedServiceWeekDays=row.applied_service_days_per_week === "" ? libraryServiceWeekDays : csvNumber(row.applied_service_days_per_week,libraryServiceWeekDays ?? 0);
+            const cuOverridden=csvBoolean(row.cu_overridden,appliedCu !== libraryCu), daysOverridden=csvBoolean(row.days_overridden,appliedDays !== libraryDays), serviceWeekDaysOverridden=csvBoolean(row.service_days_overridden,appliedServiceWeekDays !== libraryServiceWeekDays);
+            return { task:row.task?.trim(), type:row.task_type?.trim() || "Imported activity", unit:row.unit?.trim(), quantity, libraryCu, appliedCu, totalCu:quantity*appliedCu, libraryDays, appliedDays, totalDays:row.total_days === "" ? quantity*(appliedDays ?? 1) : csvNumber(row.total_days), libraryServiceWeekDays, appliedServiceWeekDays, cuOverridden, daysOverridden, serviceWeekDaysOverridden, overridden:cuOverridden || daysOverridden || serviceWeekDaysOverridden };
+          }).filter(line => line.task && line.unit && line.quantity > 0);
+          const plannedCu=lines.reduce((sum,line) => sum+line.totalCu,0), targetCu=targetFor(clinicalEffort,importedAdjustedFte);
+          if (!lines.length || targetCu <= 0 || plannedCu < targetCu) { failures.push(providerName); continue; }
+          const existing=savedPlans.find(plan => plan.providerName === providerName && plan.division === planDivision);
+          const payload={ id:existing?.id, providerName, division:planDivision, clinicalEffort, adjustedFte:importedAdjustedFte, adjustedFteEnabled, adjustedFteMethod:adjustedFteEnabled ? adjustedFteMethod : "direct", workedStartDate:adjustedFteEnabled && adjustedFteMethod === "dates" ? workedStartDate : null, workedEndDate:adjustedFteEnabled && adjustedFteMethod === "dates" ? workedEndDate : null, weeksNotWorking:adjustedFteEnabled && adjustedFteMethod === "leave" ? weeksNotWorking : 0, vacationCmeEnabled:csvBoolean(first.vacation_cme_enabled,true), vacationWeeks:Math.min(52,Math.max(0,csvNumber(first.vacation_cme_weeks,6))), targetCu, plannedCu, hasOverrides:lines.some(line => line.overridden), lines };
+          const response=await fetch("/api/plans",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)});
+          if (!response.ok) { failures.push(providerName); continue; }
+          const data=await response.json(); imported.push(data.plan);
+        }
+        if (!imported.length) throw new Error(failures.length ? "No complete plans met their calculated CU targets." : "No plans were found in the file.");
+        setSavedPlans(current => { const keys=new Set(imported.map(plan => `${plan.providerName}::${plan.division}`)); return [...imported,...current.filter(plan => !keys.has(`${plan.providerName}::${plan.division}`))]; });
+        setProviderRoster(current => { const next=current.map(provider => ({...provider})); imported.forEach(plan => { const index=next.findIndex(provider => provider.name === plan.providerName && provider.division === plan.division); if (index >= 0) next[index]={...next[index],effort:plan.clinicalEffort}; else next.push({id:Math.max(0,...next.map(provider => provider.id))+1,name:plan.providerName,division:plan.division,effort:plan.clinicalEffort,earned:0}); }); return next; });
+        setTaskLibrary(current => { const next=[...current]; imported.forEach(plan => plan.lines.forEach(line => { if (!next.some(task => task.task === line.task && task.division === plan.division)) { const inpatient=(line.type ?? "").toLowerCase().includes("inpatient"); next.push({id:Math.max(0,...next.map(task => task.id))+1,task:line.task,division:plan.division,unit:line.unit,type:line.type ?? "Imported activity",cu:line.libraryCu,days:inpatient ? 1 : line.libraryDays ?? .5,serviceWeekDays:inpatient ? line.libraryServiceWeekDays ?? 5 : undefined}); } })); return next; });
+        flash(`${imported.length} completed plan${imported.length === 1 ? "" : "s"} imported${failures.length ? ` · ${failures.length} skipped` : ""}`);
+      } catch (error) { flash(error instanceof Error ? error.message : "The completed plans could not be imported."); }
+      finally { setImportingPlans(false); if (completedPlanFileRef.current) completedPlanFileRef.current.value=""; }
+    };
+    reader.onerror=() => { setImportingPlans(false); flash("The completed-plan CSV could not be read."); };
+    reader.readAsText(file);
+  };
 
   const proposalTasks = divisionTasks.filter(task => suggestionEnabled[task.id] ?? false).sort((a, b) => (cuOverrides[b.id] ?? b.cu) - (cuOverrides[a.id] ?? a.cu));
   const displayTasks = [...divisionTasks].sort((a,b) => Number(suggestionEnabled[b.id] ?? false) - Number(suggestionEnabled[a.id] ?? false));
@@ -211,7 +281,7 @@ export default function Home() {
       <button className={tab === "library" ? "active" : ""} onClick={() => setTab("library")}>Task library <span>{taskLibrary.length}</span></button>
       <button className={tab === "providers" ? "active" : ""} onClick={() => setTab("providers")}>Providers <span>{providerRoster.length}</span></button>
     </nav>
-    <input ref={taskFileRef} hidden type="file" accept=".csv,text/csv" onChange={importTasks}/><input ref={providerFileRef} hidden type="file" accept=".csv,text/csv" onChange={importProviders}/>
+    <input ref={taskFileRef} hidden type="file" accept=".csv,text/csv" onChange={importTasks}/><input ref={providerFileRef} hidden type="file" accept=".csv,text/csv" onChange={importProviders}/><input ref={completedPlanFileRef} hidden type="file" accept=".csv,text/csv" onChange={importCompletedPlans}/>
     {notice && <div className="toast">{notice}</div>}
 
     <section className="shell">
@@ -250,9 +320,9 @@ export default function Home() {
       </div>}
 
       {tab === "approved" && <section className="approved-view">
-        <div className="records-head"><div><div className="eyebrow">Saved records</div><h2>Approved provider plans</h2><p>Complete CU plans with a permanent record of any temporary rate adjustments.</p></div><button className="primary" onClick={() => setTab("calculator")}>＋ Build new plan</button></div>
+        <div className="records-head"><div><div className="eyebrow">Saved records</div><h2>Approved provider plans</h2><p>Download plans for offline revision, then import the completed-plan CSV to continue iterating.</p></div><div className="record-actions"><button className="outline" disabled={importingPlans} onClick={() => completedPlanFileRef.current?.click()}><span>↑</span>{importingPlans ? "Importing…" : "Import completed plans"}</button><button className="outline" disabled={!savedPlans.length} onClick={() => downloadPlansCsv(savedPlans,`clinical-unit-plans-${new Date().toISOString().slice(0,10)}.csv`)}><span>↓</span>Export all CSV</button><button className="primary" onClick={() => setTab("calculator")}>＋ Build new plan</button></div></div>
         {savedPlans.length ? <div className="plan-records">{savedPlans.map(plan => <article className="plan-record" key={plan.id}>
-          <div className="record-top"><div className="record-person"><i>{initials(plan.providerName)}</i><div><h3>{plan.providerName}</h3><p>{plan.division} · {plan.clinicalEffort}% clinical effort</p></div></div><div className="record-badges"><span className="approved-badge">✓ Approved</span>{plan.hasOverrides && <span className="override-badge">⚑ Temporary value</span>}</div></div>
+          <div className="record-top"><div className="record-person"><i>{initials(plan.providerName)}</i><div><h3>{plan.providerName}</h3><p>{plan.division} · {plan.clinicalEffort}% clinical effort</p></div></div><div className="record-badges"><button className="download-record" onClick={() => downloadPlansCsv([plan],`${plan.providerName.replace(/[^a-z0-9]+/gi,"-").replace(/^-|-$/g,"").toLowerCase()}-cu-plan.csv`)}>↓ Download CSV</button><span className="approved-badge">✓ Approved</span>{plan.hasOverrides && <span className="override-badge">⚑ Temporary value</span>}</div></div>
           <div className="record-metrics"><div><span>Target</span><b>{plan.targetCu} CU</b></div><div><span>Planned</span><b>{plan.plannedCu.toFixed(1)} CU</b></div><div><span>Adjusted FTE</span><b>{((plan.adjustedFte ?? 1)*100).toFixed(1)}%</b><small>{!plan.adjustedFteEnabled ? "Not applied" : plan.adjustedFteMethod === "dates" ? `${plan.workedStartDate}–${plan.workedEndDate}` : plan.adjustedFteMethod === "leave" ? `${(plan.weeksNotWorking ?? 0).toFixed(1)} weeks not working` : "Direct entry"}</small></div><button className="edit-record" onClick={() => editPlan(plan)}>Edit in calculator →</button></div>
           <div className="record-lines">{plan.lines.map((line, index) => { const inpatient=(line.type ?? "").toLowerCase().includes("inpatient"); return <div key={`${line.task}-${index}`}><span><b>{line.task}</b><small>{line.quantity} {plural(line.unit,line.quantity)}</small></span><span className={line.overridden ? "flagged-rate" : ""}>{line.appliedCu} CU · {inpatient ? `${line.appliedServiceWeekDays ?? 5} service days/wk` : `${line.appliedDays ?? "—"} days/${line.unit}`}{line.overridden && <small>Library: {line.libraryCu} CU · {inpatient ? `${line.libraryServiceWeekDays ?? 5} service days/wk` : `${line.libraryDays ?? "—"} days`}</small>}</span><strong>{line.totalCu.toFixed(1)} CU<small>{line.totalDays?.toFixed(1) ?? "—"} days</small></strong></div>})}</div>
         </article>)}</div> : <div className="panel empty-records"><div>✓</div><h3>No approved plans yet</h3><p>Build a provider’s full plan to their target, then approve and save it here.</p><button className="primary" onClick={() => setTab("calculator")}>Open calculator</button></div>}
