@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { providers } from "../../../db/schema";
+import { approvedPlans, planHistory, providers } from "../../../db/schema";
 
 const serialize = (row: typeof providers.$inferSelect) => ({ ...row, effort: row.clinicalEffortBasisPoints / 100, adjustedFte: row.adjustedFteBasisPoints / 10000 });
 
@@ -21,6 +21,6 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  try { const id=Number(new URL(request.url).searchParams.get("id")); if (!id) return Response.json({error:"Provider id is required"},{status:400}); await getDb().delete(providers).where(eq(providers.id,id)); return Response.json({ok:true}); }
+  try { const url=new URL(request.url), id=Number(url.searchParams.get("id")), deletePlans=url.searchParams.get("deletePlans") === "true"; if (!id) return Response.json({error:"Provider id is required"},{status:400}); const provider=(await getDb().select().from(providers).where(eq(providers.id,id)).limit(1))[0]; if (!provider) return Response.json({error:"Provider not found"},{status:404}); if (deletePlans) { const plans=await getDb().select({id:approvedPlans.id}).from(approvedPlans).where(or(eq(approvedPlans.providerKey,provider.providerKey),and(eq(approvedPlans.providerName,provider.name),eq(approvedPlans.division,provider.division)))); const ids=plans.map(plan => plan.id); if (ids.length) { await getDb().delete(planHistory).where(inArray(planHistory.planId,ids)); await getDb().delete(approvedPlans).where(inArray(approvedPlans.id,ids)); } } await getDb().delete(providers).where(eq(providers.id,id)); return Response.json({ok:true,deletedPlans:deletePlans}); }
   catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Unable to delete provider" }, { status: 500 }); }
 }

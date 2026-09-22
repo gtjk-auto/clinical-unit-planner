@@ -14,7 +14,7 @@ export async function POST(request: Request) {
     const body=await request.json() as { id?: number; task?: string; cu?: number; days?: number; serviceWeekDays?: number; weekendOnly?: boolean; unit?: string; type?: string; division?: string };
     const task=body.task?.trim(), unit=body.unit?.trim(), type=body.type?.trim(), division=body.division?.trim(), cu=Math.max(.01,body.cu ?? 0), inpatient=type?.toLowerCase().includes("inpatient");
     if (!task || !unit || !type || !division || !cu) return Response.json({error:"Task, CU, unit, type, and division are required"},{status:400});
-    const values={task,cu:Math.round(cu*100),days:Math.round((inpatient ? 1 : body.days ?? .5)*100),serviceWeekDays:inpatient && !body.weekendOnly ? Math.round(Math.min(7,Math.max(1,body.serviceWeekDays ?? 5))*100) : null,weekendOnly:Boolean(inpatient && body.weekendOnly),unit:inpatient ? "day" : unit,type,division,updatedAt:new Date().toISOString()};
+    const values={task,cu:Math.round(cu*100),days:Math.round((inpatient ? 1 : body.days ?? .5)*100),serviceWeekDays:inpatient ? Math.round(Math.min(7,Math.max(1,body.serviceWeekDays ?? 5))*100) : null,weekendOnly:false,unit:inpatient ? "day" : unit,type,division,updatedAt:new Date().toISOString()};
     const [row]=body.id ? await getDb().update(clinicalTasks).set(values).where(eq(clinicalTasks.id,body.id)).returning() : await getDb().insert(clinicalTasks).values(values).returning();
     return Response.json({task:serialize(row)},{status:201});
   } catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Unable to save task" }, { status: 500 }); }

@@ -30,13 +30,36 @@ export async function POST(request: Request) {
     const vacationWeeks=Math.min(52,Math.max(0,body.vacationWeeks ?? 6));
     const status=(body.plannedCu ?? 0) >= body.targetCu ? "complete" : "below_target", now=new Date().toISOString();
     const values = { providerKey:body.providerKey ?? null, providerName: body.providerName, division: body.division, clinicalEffort: body.clinicalEffort ?? 0, targetCu: body.targetCu, plannedCu: Math.round((body.plannedCu ?? 0) * 100), vacationWeeks: Math.round(vacationWeeks * 100), vacationCmeEnabled: body.vacationCmeEnabled ?? true, adjustedFte: Math.round(adjustedFte * 100), adjustedFteBasisPoints: Math.round(adjustedFte * 10000), adjustedFteEnabled: Boolean(body.adjustedFteEnabled), adjustedFteMethod: method, workedStartDate: body.workedStartDate ?? null, workedEndDate: body.workedEndDate ?? null, weeksNotWorking: Math.round((body.weeksNotWorking ?? 0) * 100), hasOverrides: Boolean(body.hasOverrides), comment:(body.comment ?? "").trim(), planJson: JSON.stringify(body.lines), status, updatedAt:now };
+    const prior=body.id ? (await getDb().select().from(approvedPlans).where(eq(approvedPlans.id,body.id)).limit(1))[0] : undefined;
     const [plan] = body.id
       ? await getDb().update(approvedPlans).set(values).where(eq(approvedPlans.id, body.id)).returning()
       : await getDb().insert(approvedPlans).values({...values,createdAt:now}).returning();
     const snapshot={plannedCu:body.plannedCu ?? 0,targetCu:body.targetCu,status,comment:body.comment ?? "",lines:body.lines,adjustedFte,vacationWeeks};
-    await getDb().insert(planHistory).values({planId:plan.id,providerKey:body.providerKey ?? null,providerName:body.providerName,division:body.division,actor:"Admin",action:body.id ? "Plan updated" : "Plan created",summary:body.changeSummary ?? (body.id ? "Plan values were revised" : "Plan was saved"),snapshotJson:JSON.stringify(snapshot),createdAt:now});
+    const oldSnapshot=prior ? {plannedCu:prior.plannedCu/100,targetCu:prior.targetCu,comment:prior.comment,adjustedFte:prior.adjustedFteBasisPoints == null ? prior.adjustedFte/100 : prior.adjustedFteBasisPoints/10000,vacationWeeks:prior.vacationWeeks/100,lines:JSON.parse(prior.planJson) as Record<string,unknown>[]} : undefined;
+    const details:string[]=[];
+    const show=(value:unknown) => typeof value === "number" ? Number(value.toFixed(2)) : value;
+    if (!oldSnapshot) details.push(...(body.lines as Record<string,unknown>[]).map(line => `Added ${line.task}: ${show(Number(line.quantity ?? 0))} ${line.unit ?? "units"} at ${show(Number(line.appliedCu ?? 0))} CU`));
+    else {
+      (["plannedCu","targetCu","adjustedFte","vacationWeeks","comment"] as const).forEach(field => { if (JSON.stringify(oldSnapshot[field]) !== JSON.stringify(snapshot[field])) details.push(`${field}: ${show(oldSnapshot[field])} → ${show(snapshot[field])}`); });
+      const key=(line:Record<string,unknown>) => `${line.task ?? ""}::${line.taskDivision ?? body.division}`;
+      const before=new Map(oldSnapshot.lines.map(line => [key(line),line])), after=new Map((body.lines as Record<string,unknown>[]).map(line => [key(line),line]));
+      for (const [lineKey,line] of after) { const previous=before.get(lineKey); if (!previous) details.push(`Added ${line.task}: ${show(Number(line.quantity ?? 0))} ${line.unit ?? "units"}`); else (["quantity","included","weekendOnly","appliedCu","appliedDays","appliedServiceWeekDays"] as const).forEach(field => { if (JSON.stringify(previous[field]) !== JSON.stringify(line[field])) details.push(`${line.task} · ${field}: ${show(previous[field])} → ${show(line[field])}`); }); }
+      for (const [lineKey,line] of before) if (!after.has(lineKey)) details.push(`Removed ${line.task}`);
+    }
+    const summary=details.length ? details.join(" | ") : body.changeSummary ?? (body.id ? "Plan saved with no material changes" : "Plan was saved");
+    await getDb().insert(planHistory).values({planId:plan.id,providerKey:body.providerKey ?? null,providerName:body.providerName,division:body.division,actor:"Admin",action:body.id ? "Plan updated" : "Plan created",summary,snapshotJson:JSON.stringify(snapshot),createdAt:now});
     return Response.json({ plan: { ...plan, plannedCu: body.plannedCu, vacationWeeks, vacationCmeEnabled: body.vacationCmeEnabled ?? true, adjustedFte, adjustedFteEnabled: Boolean(body.adjustedFteEnabled), adjustedFteMethod: method, workedStartDate: body.workedStartDate ?? null, workedEndDate: body.workedEndDate ?? null, weeksNotWorking: body.weeksNotWorking ?? 0, lines: body.lines } }, { status: 201 });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Unable to save plan" }, { status: 500 });
   }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const id=Number(new URL(request.url).searchParams.get("id"));
+    if (!id) return Response.json({error:"Plan id is required"},{status:400});
+    await getDb().delete(planHistory).where(eq(planHistory.planId,id));
+    await getDb().delete(approvedPlans).where(eq(approvedPlans.id,id));
+    return Response.json({ok:true});
+  } catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Unable to delete plan" }, { status: 500 }); }
 }
